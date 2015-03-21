@@ -1,0 +1,1 @@
+DEBUG=broker ./bin/www
