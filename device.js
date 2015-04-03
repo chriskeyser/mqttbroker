@@ -3,6 +3,7 @@ var fs = require('fs');
 var crypto = require('crypto');
 var AWS = require('aws-sdk');
 var user = require('./user');
+var mqttLock = require('./mqttlock');
 
 var key = 'alias/lockservice';
 var device = {};
@@ -29,7 +30,7 @@ function getKeyFilePath(keyName) {
 // registers a device by generate a key, saving the device to the user profile, and then
 // returning the plaintext of the key to set on the device.
 //
-device.registerDevice = function(userid, deviceid, callback) {
+device.register = function(userid, deviceid, callback) {
     var kms = new AWS.KMS();
     var keyFileName = getKeyFileName(userid, deviceid);
 
@@ -53,15 +54,15 @@ device.registerDevice = function(userid, deviceid, callback) {
                 if(fileerr) {
                     console.log('error saving key: ' + fileerr);
                     console.log('stack: ' + fileerr.stack);
-                    callback(false, null);
+                    callback(filerr, null);
                 }  else {
                     user.addLock(userid, deviceid, function(updateErr, userdata) {
                         if(updateErr) {
                             console.log('Error: registerDevice: ', updateErr);
-                            callback(false, null);
+                            callback(updateErr, null);
                         } else {      
                             console.log('kms data: ', keydata);
-                            callback(true, keydata.Plaintext);
+                            callback(null, keydata.Plaintext);
                             //TODO: clean up plain text key?
                         }
                     });
@@ -71,11 +72,11 @@ device.registerDevice = function(userid, deviceid, callback) {
     });
 };
 
-device.deregisterDevice = function(userid, deviceid, callback) {
+device.deregister = function(userid, deviceid, callback) {
     user.removeLock(userid, deviceid, function(updateErr, data) {
         if(updateErr) {
             conole.log('error: ', updateErr);
-            callback(false, null);
+            callback(updateErr, null);
         } else {
             var keyFileName = getKeyFileName(userid, deviceid);
             var keyFile = getKeyFilePath(keyFileName);
@@ -83,20 +84,42 @@ device.deregisterDevice = function(userid, deviceid, callback) {
                 if(deleteErr) console.log('key file deletion error: ', deleteErr);
             });
 
-            callback(true, data);
+            callback(null, data);
         }
     });
 };
 
-device.listDevices = function(userid, callback) {
+device.list = function(userid, callback) {
     user.getLockList(userid, function(err, locks) {
         if(err) {
             console.log('error: ', err);
-            callback(false, null);
+            callback(err, null);
         } else {
-            callback(true, locks);
+            callback(null, locks);
         }
     });
 };
+
+device.unlock = function(userid, deviceid, callback) {
+    //TODO: add code for sending/receiving messages to device
+    mqttLock.unlock(deviceid, function(err, result) {
+        if(err) {
+            callback(err);
+        } else {
+            callback(null, result);
+        }
+    });
+};
+
+device.lock = function(userid, deviceid, callback) {
+    mqttLock.lock(deviceid, function(err, result) {
+        if(err) {
+            callback(err);
+        } else {
+            callback(null, result);
+        }
+    });
+};
+
 
 module.exports = device;
