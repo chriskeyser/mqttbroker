@@ -102,7 +102,7 @@ device.list = function(userid, callback) {
 
 device.unlock = function(userid, deviceid, callback) {
     //TODO: add code for sending/receiving messages to device
-    mqttLock.unlock(deviceid, function(err, result) {
+    mqttLock.setlock(deviceid, false, function(err, result) {
         if(err) {
             callback(err);
         } else {
@@ -112,9 +112,9 @@ device.unlock = function(userid, deviceid, callback) {
 };
 
 device.lock = function(userid, deviceid, callback) {
-    mqttLock.lock(deviceid, function(err, result) {
+    mqttLock.setlock(deviceid, true, function(err, result) {
         if(err) {
-            callback(err);
+            callback(err, result);
         } else {
             callback(null, result);
         }

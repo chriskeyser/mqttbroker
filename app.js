@@ -66,29 +66,47 @@ app.get('/api/device/list', function(req, res) {
     });
 });
 
-app.post('/api/device/:deviceId/lock', function(req,res) {
+function getLockDescription(isLocked) {
+   if(isLocked === true) {
+     return 'locked';
+   } else {
+     return 'unlocked';
+   }
+}
 
-    device.lock(req.user.sub, request.params.deviceId, function(err, result) {
-         if(err) {
-           console.log('lock failure');
-           res.status(result.status).send(result.message);
-        } else {
-          responseMsg = { lock: deviceId, status: 'locked' };
-          res.send(responseMsg);
-        }
-    });
-});
+app.put('/api/device/:deviceId/lock', function(req,res) {
+    var shouldLock = req.body.lockState;
+    var deviceId = req.params.deviceId;
 
-app.post('/api/device/:deviceId/unlock', function(req, res) {  
-    device.unlock(req.user.sub, request.params.deviceId, function(err, result) {
-       if(err) {
-           console.log('unlock failure');
-           res.status(result.status).send(result.message);
-        } else {
-          responseMsg = { lock: deviceId, status: 'unlocked' };
-          res.send(responseMsg);
-        }
-    });
+    if(shouldLock === undefined || shouldLock === undefined ) {
+        console.error('error, missing parameters or device id: ');
+        res.status(404);
+        res.send({message: 'missing parameters or device id'});
+    }else if(shouldLock === true) {
+        device.lock(req.user.sub, req.params.deviceId, function(err, result) {
+             if(err) {
+               console.log('lock failure', err);
+               res.status(500).send(result);
+            } else {
+              responseMsg = { lock: req.params.deviceId, status: getLockDescription(result) };
+              res.send(responseMsg);
+            }
+        });
+    }else if(shouldLock === false) {
+        device.unlock(req.user.sub, req.params.deviceId, function(err, result) {
+           if(err) {
+               console.log('unlock failure');
+               res.status(500).send(err);
+            } else {
+              responseMsg = { lock: deviceId, status: getLockDescription(result)};
+              res.send(responseMsg);
+            }
+        });
+    }else {
+        console.error('error, message not understood: ', req.body.lockState);
+        res.status(404);
+        res.send({message: 'missing or invalid lock state'});
+    }
 });
 
 

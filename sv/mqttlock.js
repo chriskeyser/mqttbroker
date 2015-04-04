@@ -1,29 +1,84 @@
-var mqtt = require('mqtt')
+var mqtt = require('mqtt');
+var _ = require('underscore');
 
-function MqttLock(host, port, retryInterval, clientId) {
-    this.host = host;
-    this port = port;
-    this.retry = retryInterval;
-    this.settings = {
-        keepalive: 2000,
-        protocol: 'MQTT',
-        protocolVersion: 4,
-        clientid: clientId,
-        port: port,
-        host: host
-    };
+var mqttLock = {};
+var client = null;
 
+var lockResponseTopic = 'lockctl';
+
+mqttLock.defaultSettings = {
+   keepalive: 2000,
+   protocol: 'MQTT',
+   protocolVersion: 4,
+   clientid: 'lock-broker-client',
+   port: 1883,
+   host: 'localhost'
+};
+
+mqttLock.lockOperationTimeout = 10;  // time in seconds for timeout.
+
+function checkTimeout(mqttClient) {
+
+    var curTime = new Date().getTime();
+    var q = mqttClient.timeoutQueue;
+
+    while(q.length > 0 && q[0].timeOut > curTime) {
+       var timedOut = q.shift();
+       if(mqttClient.pendingOperations[timeout.deviceId]){
+          delete mqttClient.pendingOperations[timeout.deviceId];
+       }
+
+       if(!timedOut.completed) {
+         timedOut.callback({error: 'timeout'});
+       }
+   }
 }
 
-//TODO: need to update the following to figure out how to deal with closure
-MqttLock.prototype.start(callback) {
-    this.lockMap = [];
-    this.client = mqtt.connect(this.settings);
-    this.setInterval(this.checkTimeout, this.retry, client);
-    this.client.on('connect', this.handleConnect);
-    this.client.on('message', this.handleMessage);
 
-    this.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
+function handleConnect() {
+    mqttLock.client.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
+        if(err) console.log('failed to subscribe to topic');
+        else {
+          console.info('client connected to mqtt server for lock operations');      
+        }
+   });
+}
+
+function handleMessage(topic, message) {
+   if(topic === lockResponseTopic) {
+       if(message.deviceId) {
+            console.info('received message: ', message);
+            var op = mqttLock.pendingOperations[message.deviceId];
+            if(op) {
+                op.completed = true;
+                op.callback(null, message.isLocked);           
+            } else {
+                console.error('no device matched to message: ', message);                
+            }
+        } else {
+           console.error('missing device id, message: ', message);
+        } 
+    } else {
+       console.error('unknown topic: ', topic, ' message: ', message);
+    }
+}
+
+mqttLock.start = function(opt, callback) {
+    var self = this;
+    self.pendingOperations = {};
+    self.timeoutQueue = [];
+
+
+    var settings = {};
+    _.extend(settings, this.defaultSettings, opt);
+
+    self.client = mqtt.connect(settings);
+    self.client.on('connect', handleConnect);
+    self.client.on('message', handleMessage);
+
+    setInterval(checkTimeout, 2000, self);
+
+    self.client.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
         if(err) {
             console.error('error registering with mqtt: ', err);
             callback(err);
@@ -33,26 +88,33 @@ MqttLock.prototype.start(callback) {
             callback(null);
         }
     });
-}
+};
 
 
-MqttLock.prototype.handleConnect() {
-   client.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
-    if(err) console.log('failed to subscribe to topic');
-    else {
-      sendLock(client);
+mqttLock.lock = function(deviceId, callback) {
+    var self = this;
+
+    if(self.client) {
+        var lockcmd = {lock:true};
+        var lockCmdStr = JSON.stringify(lockCmd);
+        console.info('published: ' + lockCmdStr);
+
+        var queueReq = {
+            timeOut: new Date().getTime() + 1000 * self.lockOperationTimeout,
+            callback: callback,
+            completed: false
+        };
+
+        self.pendingOperations[deviceId] = queueReq;
+        self.timeoutQueue.push(queueReq);
+        client.publish(deviceId, lockCmdStr);
+    }else {
+        console.error('call to lock before calling start');
+        callback({error: 'call to lock and client not initialized'});
     }
-   });
-});
+};
 
 
-function checkTimeout(client) {
-
-}
-
-
-setInterval(checkTimeout, 2000, client);
-
-module.exports = mqttClient;
+module.exports = mqttLock;
 
 

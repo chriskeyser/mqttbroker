@@ -22,14 +22,17 @@ function checkTimeout(mqttClient) {
     var curTime = new Date().getTime();
     var q = mqttClient.timeoutQueue;
 
-    while(q.length > 0 && q[0].timeOut > curTime) {
+    while(q.length > 0 && curTime > q[0].timeOut) {
        var timedOut = q.shift();
-       if(mqttClient.pendingOperations[timeout.deviceId]){
-          delete mqttClient.pendingOperations[timeout.deviceId];
+       if(mqttClient.pendingOperations[timedOut.deviceId]){
+          console.warn('timed out: ', timedOut.deviceId, ' cur time: ', curTime, 'timeout: ', timedOut.timeOut);         
+          delete mqttClient.pendingOperations[timedOut.deviceId];
+       } else if(!timedOut.completed) {
+          console.warn('could not find uncompleted op for device in pending operations: ', timedOut.deviceId);
        }
 
        if(!timedOut.completed) {
-         timedOut.callback({error: 'timeout'});
+         timedOut.callback({error: 'timeout'}, 'timeout');
        }
    }
 }
@@ -37,27 +40,39 @@ function checkTimeout(mqttClient) {
 
 function handleConnect() {
     mqttLock.client.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
-        if(err) console.log('failed to subscribe to topic');
+        if(err) console.warn('failed to subscribe to topic');
         else {
-          console.info('client connected to mqtt server for lock operations');      
+          console.log('client connected to mqtt server for lock operations');      
         }
    });
 }
 
-function handleMessage(topic, message) {
+function handleMessage(topic, buffer) {
    if(topic === lockResponseTopic) {
-       if(message.deviceId) {
-            console.info('received message: ', message);
-            var op = mqttLock.pendingOperations[message.deviceId];
-            if(op) {
-                op.completed = true;
-                op.callback(null, message.isLocked);           
+       console.log('handleMessage: rcvd message, buffer:', buffer);
+       var data = buffer.toString();
+       console.log('handleMessage: utf8 string: ', data);
+
+       if(data && data.length > 0) {
+           var message = JSON.parse(data);
+           console.log('mqtt json message: ', message);
+
+           if(message.deviceId) {
+                console.log('received message: ', message);
+                var op = mqttLock.pendingOperations[message.deviceId];
+                if(op) {
+                    op.completed = true;
+                    op.callback(null, message.isLocked);          
+                    delete mqttLock.pendingOperations[message.deviceId];
+                } else {
+                    console.error('no device matched to message: ', message);                
+                }
             } else {
-                console.error('no device matched to message: ', message);                
-            }
-        } else {
-           console.error('missing device id, message: ', message);
-        } 
+               console.error('missing device id, message: ', message);
+            } 
+       } else {
+         console.error('bad message, buffer contents: ', buffer);
+       }
     } else {
        console.error('unknown topic: ', topic, ' message: ', message);
     }
@@ -85,34 +100,44 @@ mqttLock.start = function(opt, callback) {
         } 
         else {
             console.info('registered with mqtt: ', granted);
-            callback(null);
+            callback(null, 'registered');
         }
     });
 };
 
 
-mqttLock.lock = function(deviceId, callback) {
+mqttLock.setlock = function(deviceId, locked, callback) {
     var self = this;
 
     if(self.client) {
-        var lockcmd = {lock:true};
-        var lockCmdStr = JSON.stringify(lockCmd);
+        var lockcmd = {lock:locked};
+        var lockCmdStr = JSON.stringify(lockcmd);
         console.info('published: ' + lockCmdStr);
 
-        var queueReq = {
-            timeOut: new Date().getTime() + 1000 * self.lockOperationTimeout,
-            callback: callback,
-            completed: false
-        };
+        if(self.pendingOperations[deviceId] === undefined) {
+            var queueReq = {
+                timeOut: new Date().getTime() + (1000 * self.lockOperationTimeout),
+                callback: callback,
+                deviceId: deviceId,
+                completed: false
+            };
 
-        self.pendingOperations[deviceId] = queueReq;
-        self.timeoutQueue.push(queueReq);
-        client.publish(deviceId, lockCmdStr);
+            console.log('locking: ', deviceId, ' desired lock state: ', locked, ' timeout: ', queueReq.timeOut);
+            
+            self.pendingOperations[deviceId] = queueReq;
+            self.timeoutQueue.push(queueReq);
+            self.client.publish(deviceId, lockCmdStr);
+        }else {
+            callback({error: 'call to lock that has a pending operation'});
+        }
     }else {
         console.error('call to lock before calling start');
         callback({error: 'call to lock and client not initialized'});
     }
 };
+
+mqttLock.locked = true;
+mqttLock.unlocked = false;
 
 
 module.exports = mqttLock;
