@@ -3,6 +3,7 @@ var _ = require('underscore');
 
 var mqttLock = {};
 var client = null;
+var START_ENCRYPT_DATA = 24;
 
 var lockResponseTopic = 'lockctl';
 
@@ -18,25 +19,22 @@ mqttLock.defaultSettings = {
 mqttLock.lockOperationTimeout = 10;  // time in seconds for timeout.
 
 function checkTimeout(mqttClient) {
-
     var curTime = new Date().getTime();
     var q = mqttClient.timeoutQueue;
 
     while(q.length > 0 && curTime > q[0].timeOut) {
        var timedOut = q.shift();
-       if(mqttClient.pendingOperations[timedOut.deviceId]){
+       if(!timedOut.completed && mqttClient.pendingOperations[timedOut.deviceId]){
           console.warn('timed out: ', timedOut.deviceId, ' cur time: ', curTime, 'timeout: ', timedOut.timeOut);         
           delete mqttClient.pendingOperations[timedOut.deviceId];
+          timedOut.callback({error: 'timeout'}, 'timeout');
        } else if(!timedOut.completed) {
-          console.warn('could not find uncompleted op for device in pending operations: ', timedOut.deviceId);
-       }
-
-       if(!timedOut.completed) {
-         timedOut.callback({error: 'timeout'}, 'timeout');
+          console.warn('device in pending operation not found: ', timedOut.deviceId);
+       }else{
+           // don't need to do anything, operation completed so no action to take.
        }
    }
 }
-
 
 function handleConnect() {
     mqttLock.client.subscribe(lockResponseTopic, {qos:0}, function(err, granted) {
@@ -50,31 +48,45 @@ function handleConnect() {
 function handleMessage(topic, buffer) {
    if(topic === lockResponseTopic) {
        console.log('handleMessage: rcvd message, buffer:', buffer);
-       var data = buffer.toString();
-       console.log('handleMessage: utf8 string: ', data);
+       
+       var lockId = (buffer.toString('utf-8', 0,  START_ENCRYPT_DATA-1)).replace(/\0/g, '');
 
-       if(data && data.length > 0) {
-           var message = JSON.parse(data);
-           console.log('mqtt json message: ', message);
+       console.log('handleMessage: lockid:', lockId, ' length: ', lockId.length);
 
-           if(message.deviceId) {
-                console.log('received message: ', message);
-                var op = mqttLock.pendingOperations[message.deviceId];
-                if(op) {
-                    op.completed = true;
-                    op.callback(null, message.isLocked);          
-                    delete mqttLock.pendingOperations[message.deviceId];
-                } else {
-                    console.error('no device matched to message: ', message);                
-                }
+       if(lockId.length > 0) {
+            var op = mqttLock.pendingOperations[lockId];
+            if(op) {
+                op.completed = true;
+                console.log("buffer length:", buffer.length);
+                var msgbuffer = buffer.slice(START_ENCRYPT_DATA);
+                console.log('msg buffer', msgbuffer);
+
+                var decrypted = op.encrypt.decrypt(msgbuffer, function(err, str) {
+                    if(err) {
+                        console.log('failed decrypting message', err, ' device: ', 
+                            lockId, 'data: ', buffer);
+                        op.callback({error: 'decryption failed'});
+
+                    }else {
+                        var message = JSON.parse(str);
+                        if(message.devId===lockId) {
+                            op.callback(null, message.locked);
+                        }else {
+                            console.error('invalid lock response received for lock:',lockId, ' payload for: ', op.devId);
+                            op.callback({error: 'response received from invalid lock'});
+                        }                        
+                    }
+
+                    delete mqttLock.pendingOperations[lockId];
+                });
             } else {
-               console.error('missing device id, message: ', message);
-            } 
+                console.error('no lock matched to message: ', lockId );
+            }
        } else {
          console.error('bad message, buffer contents: ', buffer);
        }
     } else {
-       console.error('unknown topic: ', topic, ' message: ', message);
+       console.error('unknown topic: ', topic, ' message: ',buffer);
     }
 }
 
@@ -106,30 +118,40 @@ mqttLock.start = function(opt, callback) {
 };
 
 
-mqttLock.setlock = function(deviceId, locked, callback) {
+mqttLock.setlock = function(deviceId, locked, deviceEncrypt, callback) {
     var self = this;
 
     if(self.client) {
         var lockcmd = {lock:locked};
         var lockCmdStr = JSON.stringify(lockcmd);
-        console.info('published: ' + lockCmdStr);
+        console.info('publishing: ' + lockCmdStr);
 
         if(self.pendingOperations[deviceId] === undefined) {
             var queueReq = {
                 timeOut: new Date().getTime() + (1000 * self.lockOperationTimeout),
                 callback: callback,
                 deviceId: deviceId,
-                completed: false
+                completed: false,
+                encrypt: deviceEncrypt
             };
 
-            console.log('locking: ', deviceId, ' desired lock state: ', locked, ' timeout: ', queueReq.timeOut);
+            console.log('locking:', deviceId, ' is locked:', locked, ' expire:', queueReq.timeOut);
             
-            self.pendingOperations[deviceId] = queueReq;
-            self.timeoutQueue.push(queueReq);
-            self.client.publish(deviceId, lockCmdStr);
+            deviceEncrypt.encrypt(lockCmdStr, function(encryptErr, buffer) {
+                if(encryptErr) {
+                    console.log('setlock failed, encrypt error', encryptErr);
+                    callback( {error: 'encryption failed'});
+                } else {
+                    self.pendingOperations[deviceId] = queueReq;
+                    self.timeoutQueue.push(queueReq);
+                    console.log('sending message buffer: ', buffer);
+                    self.client.publish(deviceId, buffer);
+                }
+            });
         }else {
             callback({error: 'call to lock that has a pending operation'});
         }
+        
     }else {
         console.error('call to lock before calling start');
         callback({error: 'call to lock and client not initialized'});

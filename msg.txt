@@ -1,0 +1,11 @@
+TypeError: error:06065064:digital envelope routines:EVP_DecryptFinal_ex:bad decrypt
+    at Decipher.Cipher.final (crypto.js:323:27)
+        at decryptBuffer (/home/ec2-user/mqttbroker/lockencrypt.js:110:70)
+            at DeviceEncrypt.decrypt (/home/ec2-user/mqttbroker/lockencrypt.js:158:8)
+                at MqttClient.handleMessage (/home/ec2-user/mqttbroker/mqttlock.js:62:44)
+                    at MqttClient.emit (events.js:106:17)
+                        at MqttClient._handlePublish (/home/ec2-user/mqttbroker/node_modules/mqtt/lib/client.js:694:12)
+                            at MqttClient._handlePacket (/home/ec2-user/mqttbroker/node_modules/mqtt/lib/client.js:233:12)
+                                at process (/home/ec2-user/mqttbroker/node_modules/mqtt/lib/client.js:192:12)
+                                    at Writable.writable._write (/home/ec2-user/mqttbroker/node_modules/mqtt/lib/client.js:202:5)
+                                        at doWrite (/home/ec2-user/mqttbroker/node_modules/mqtt/node_modules/readable-stream/lib/_stream_writable.js:237:10)
