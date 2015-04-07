@@ -61,7 +61,7 @@ device.list = function(userid, callback) {
 function setLockState(userid, deviceid, lockstate, callback) {
     var lockEncrypt = new LockEncrypt(userid, deviceid);
 
-    mqttLock.setlock(deviceid, false, lockEncrypt, function(lockerr, result) {
+    mqttLock.setlock(deviceid, lockstate, lockEncrypt, function(lockerr, result) {
         if(lockerr) {
             console.error('set lock operation failed: ', lockerr);
             callback(lockerr);

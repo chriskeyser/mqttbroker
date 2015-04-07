@@ -16,7 +16,8 @@ var kms = new AWS.KMS();
 var IVSIZE = 16;
 var CRYPTO_PAD_SIZE = 16;
 var BLOCKSIZE = 16;
-var maxMsgSize = (5 * 16) - 1;
+var MAXMSGSIZE = (5 * 16) - 1;
+var SHA256_LENGTH = 32; 
 
 function DeviceEncrypt(userId, lockId) {
     this.lockId = lockId;
@@ -86,7 +87,7 @@ function getCiphers(devEnc, callback) {
 function encryptStrData(devEncrypt, strData, callback) {
     var encodedStrLen = Buffer.byteLength(strData, 'utf-8');
 
-    if(encodedStrLen > maxMsgSize) {
+    if(encodedStrLen > MAXMSGSIZE) {
         callback({error: 'exceeded max msg size'});
     } else {
         var bufLen = encodedStrLen + BLOCKSIZE + 1;
@@ -101,25 +102,64 @@ function encryptStrData(devEncrypt, strData, callback) {
 
         var encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
         console.log('encrypt size; ', encrypted.length);
-        callback(null, encrypted);
+        var hash = getSignature(devEncrypt.keydata, encrypted);
+        
+        var encryptAndSign = Buffer.concat([encrypted, hash]);
+        callback(null, encryptAndSign);
     }
 }
 
+function getSignature(key, databuffer) {
+    var hmac= crypto.createHmac("sha256", key);
+    hmac.write(databuffer);
+    hmac.end();
+    var hash = hmac.read();
+    return hash; 
+}
 
-function decryptBuffer(devEncrypt, cipher, callback) {
+function checkSignature(key, databuffer, signature) {
+    var hash = getSignature(key, databuffer);
+
+    if(hash.length == signature.length) {
+        for(var i = 0; i < hash.length; i++) {
+           if(hash[i] != signature[i]) {
+               console.log('signatures do not match');
+               return false;
+           }
+        }
+    } else {
+        console.log('signature length do not match, hash len: ', hash.length, ' msg sig len: ', signature.length);
+        return false;
+    }
+
+    console.log('signatures match');
+
+    return true;
+}
+
+function decryptBuffer(devEncrypt, buffer, callback) {
 
     // using Explicit Initialization Vector, first block will be garbled, don't need to pass iv.
     // use random iv.
 
-    try {
+    try {       
       var decipher = crypto.createDecipheriv('aes-128-cbc', devEncrypt.keydata, devEncrypt.iv);
-      var decrypted = [decipher.update(cipher)];
-      decrypted.push(decipher.final());
-      var finaldecrypt = Buffer.concat(decrypted);
-      var plaintextLen = finaldecrypt.readUInt8(BLOCKSIZE);
-      var plaintext  = finaldecrypt.toString('utf8', BLOCKSIZE+1);
-      console.log('decrypt size:', plaintextLen, ' decrypt text:', plaintext);
-      callback(null, plaintext);
+      var encryptdatalen = buffer.length - SHA256_LENGTH;
+      var cipher = buffer.slice(0, encryptdatalen);
+      var sig = buffer.slice(encryptdatalen);
+      
+      if(checkSignature(devEncrypt.keydata, cipher, sig)) {
+          var decrypted = [decipher.update(cipher)];
+          decrypted.push(decipher.final());
+          var finaldecrypt = Buffer.concat(decrypted);
+          var plaintextLen = finaldecrypt.readUInt8(BLOCKSIZE);
+          var plaintext  = finaldecrypt.toString('utf8', BLOCKSIZE+1);
+          console.log('decrypt size:', plaintextLen, ' decrypt text:', plaintext);
+          callback(null, plaintext);
+      } else {
+          console.log('signatures did not match');
+          callback({error:'signature mismatch'});
+      }
     } catch(err) {
       console.error('exception on decrypt:', err);
       callback(err);
