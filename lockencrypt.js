@@ -124,11 +124,12 @@ function checkSignature(key, databuffer, signature) {
         for(var i = 0; i < hash.length; i++) {
            if(hash[i] != signature[i]) {
                console.log('signatures do not match');
+               console.log('msg:', signature, ' calc:', hash, ' buf len:', databuffer.length);
                return false;
            }
         }
     } else {
-        console.log('signature length do not match, hash len: ', hash.length, ' msg sig len: ', signature.length);
+        console.log('signature mismatch, hash len: ', hash.length, ' sig len: ', signature.length);
         return false;
     }
 
@@ -137,38 +138,42 @@ function checkSignature(key, databuffer, signature) {
     return true;
 }
 
-function decryptBuffer(devEncrypt, buffer, callback) {
+function validateMsgSig(key, buffer, callback) {
+    var signdatalen = buffer.length - SHA256_LENGTH;
+    var cipher = buffer.slice(0, signdatalen);
+    var sig = buffer.slice(signdatalen);
+
+    if(checkSignature(key, cipher, sig)) {                   
+        callback(null, cipher);
+    } else {
+        callback({error: "signature validation failed"});
+    } 
+}
+
+
+function decryptBuffer(devEncrypt, ciphertext, callback) {
 
     // using Explicit Initialization Vector, first block will be garbled, don't need to pass iv.
     // use random iv.
 
-    try {       
+    /*try {       */
       var decipher = crypto.createDecipheriv('aes-128-cbc', devEncrypt.keydata, devEncrypt.iv);
-      var encryptdatalen = buffer.length - SHA256_LENGTH;
-      var cipher = buffer.slice(0, encryptdatalen);
-      var sig = buffer.slice(encryptdatalen);
-      
-      if(checkSignature(devEncrypt.keydata, cipher, sig)) {
-          var decrypted = [decipher.update(cipher)];
-          decrypted.push(decipher.final());
-          var finaldecrypt = Buffer.concat(decrypted);
-          var plaintextLen = finaldecrypt.readUInt8(BLOCKSIZE);
-          var plaintext  = finaldecrypt.toString('utf8', BLOCKSIZE+1);
-          console.log('decrypt size:', plaintextLen, ' decrypt text:', plaintext);
-          callback(null, plaintext);
-      } else {
-          console.log('signatures did not match');
-          callback({error:'signature mismatch'});
-      }
-    } catch(err) {
+      var decrypted = [decipher.update(ciphertext)];
+      decrypted.push(decipher.final());
+      var finaldecrypt = Buffer.concat(decrypted);
+      var plaintextLen = finaldecrypt.readUInt8(BLOCKSIZE);
+      var plaintext  = finaldecrypt.toString('utf8', BLOCKSIZE+1);
+      console.log('decrypt size:', plaintextLen, ' decrypt text:', plaintext);
+      callback(null, plaintext);
+/*    } catch(err) {
       console.error('exception on decrypt:', err);
       callback(err);
-    }     
+    }     */
 
 }
 
 
-DeviceEncrypt.prototype.encrypt = function(string, callback) {
+DeviceEncrypt.prototype.encryptAndSign = function(string, callback) {
     var self = this;
     
     if(self.cipher === undefined) {
@@ -191,7 +196,7 @@ DeviceEncrypt.prototype.encrypt = function(string, callback) {
 DeviceEncrypt.prototype.decrypt = function(buffer, callback) {
     var self = this;
     
-    if(self.decipher === undefined) {
+    if(self.keydata === undefined) {
         getCiphers(self, function(cipherErr) {
             if(cipherErr) {
                 callback(cipherErr);
@@ -204,7 +209,21 @@ DeviceEncrypt.prototype.decrypt = function(buffer, callback) {
    }
 };
 
+DeviceEncrypt.prototype.validateSig = function (buffer, callback) {
+    var self = this;
 
+    if(self.keydata === undefined) {
+        getCiphers(self, function(cipherErr) {
+            if(cipherError) {
+                callback(cipherErr);
+            } else{
+                validateMsgSig(self.keydata, buffer, callback);     
+            }
+        });
+    } else {
+        validateMsgSig(self.keydata, buffer, callback);
+    }
+};
 
 DeviceEncrypt.prototype.generateLockKey = function(callback) {
     var self = this;
@@ -225,7 +244,7 @@ DeviceEncrypt.prototype.generateLockKey = function(callback) {
             console.log('stack: ' + keyerr.stack);
             callback(false, null);
         } else {
-            console.info('obtained data key, saving to file'), keydata;
+            console.info('obtained data key, saving to file:', keydata);
             var keyFile = getKeyFilePath(keyFileName);
             fs.writeFile(keyFile, keydata.CiphertextBlob, function(fileerr){
                 if(fileerr) {

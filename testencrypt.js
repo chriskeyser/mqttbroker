@@ -4,13 +4,12 @@ var lockencrypt = require('./lockencrypt');
 var userId = 'auth0-5505dde78708fd88164addd3';
 var lockId = 'lock-00AABBCC1E02';
 
-//var iv = new Buffer([206,229,225,23,158,144,57,167,78,45,5,44,224,241,198,10]);
-var iv = new Buffer([194,69,43,78,47,133,77,47,196,42,248,208,50,61,94,125]);
+var iv = new Buffer([165,21,45,247,218,212,88,53,159,12,4,35,91,15,206,9]);
 var key = new Buffer([246,64,40,106,138,16,40,75,147,132,217,186,217,153,226,76]); 
 
 console.log(key.length);
 
-var data = '{"locked":false,"devId":"lock-00AABBCC1E02"}';
+var data = '{"locked":true}';
 
 var cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
 
