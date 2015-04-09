@@ -129,8 +129,10 @@ mqttLock.setlock = function(lockId, locked, deviceEncrypt, callback) {
     var self = this;
 
     if(self.client) {
-        var lockcmd = {lock:locked};
+        var unixtime = Math.floor((new Date()).getTime()/1000);
+        var lockcmd = {lock:locked, seq: unixtime};       
         var lockCmdStr = JSON.stringify(lockcmd);
+
         console.info('publishing: ' + lockCmdStr);
 
         if(self.pendingOperations[lockId] === undefined) {
