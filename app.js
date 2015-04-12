@@ -7,12 +7,10 @@ var app = express();
 var jwt = require('express-jwt');
 var device = require('./device.js');
 var mqttLock = require('./mqttlock.js');
+var jwtconfig = require('./jwtconfig.js');
 
 //update with your key/audience values for your app...
-var jwtCheck = jwt({
-    secret: new Buffer('1hV9lFfY....yMZb2s', 'base64'),
-    audience: 'e5qA....fClQ'
-});
+var jwtCheck = jwt(jwtconfig);
 
 var mqttSettings = { port: 1883 };
 
