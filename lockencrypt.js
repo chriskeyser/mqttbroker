@@ -156,7 +156,7 @@ function decryptBuffer(devEncrypt, ciphertext, callback) {
     // using Explicit Initialization Vector, first block will be garbled, don't need to pass iv.
     // use random iv.
 
-    /*try {       */
+    try {       
       var decipher = crypto.createDecipheriv('aes-128-cbc', devEncrypt.keydata, devEncrypt.iv);
       var decrypted = [decipher.update(ciphertext)];
       decrypted.push(decipher.final());
@@ -165,10 +165,10 @@ function decryptBuffer(devEncrypt, ciphertext, callback) {
       var plaintext  = finaldecrypt.toString('utf8', BLOCKSIZE+1);
       console.log('decrypt size:', plaintextLen, ' decrypt text:', plaintext);
       callback(null, plaintext);
-/*    } catch(err) {
+    } catch(err) {
       console.error('exception on decrypt:', err);
       callback(err);
-    }     */
+    }     
 
 }
 
